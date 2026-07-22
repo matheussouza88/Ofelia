@@ -1,0 +1,43 @@
+services:
+  app:
+    build: .
+    container_name: app
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=app
+      - SERVICE_TAGS=automation
+    labels:
+      - "ofelia.enabled=true"
+      - "ofelia.job-exec.scheduled-job.schedule=@hourly"
+      - "ofelia.job-exec.scheduled-job.command=/bin/bash hourly_run.sh"
+    volumes:
+      - ./:/app
+      - ~/.gitconfig:/home/msilva/.gitconfig:ro
+      - ~/.ssh:/home/msilva/.ssh:ro
+    networks:
+      - consul_consul
+
+  ofelia:
+    image: mcuadros/ofelia:v0.3.9
+    container_name: ofelia
+    restart: unless-stopped
+    command: daemon --docker
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  watchtower:
+    image: containrrr/watchtower:1.7.1
+    container_name: watchtower
+    restart: unless-stopped
+    environment:
+      - DOCKER_API_VERSION=1.47
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ~/.docker/config.json:/config.json:ro
+    command: --interval 300 --cleanup app
+    depends_on:
+      - app
+
+networks:
+  consul_consul:
+    external: true
