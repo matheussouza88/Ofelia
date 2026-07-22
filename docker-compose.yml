@@ -18,7 +18,7 @@ services:
       - consul_consul
 
   ofelia:
-    image: mcuadros/ofelia:v0.3.9
+    image: mcuadros/ofelia:0.3.22
     container_name: ofelia
     restart: unless-stopped
     command: daemon --docker
