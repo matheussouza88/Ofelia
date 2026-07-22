@@ -12,7 +12,7 @@ pipeline {
             }
         }
 
-        stage('Build & Auto-Merge PR') {
+        stage('Build PR') {
             when {
                 changeRequest()
             }
@@ -21,11 +21,15 @@ pipeline {
                 sh 'docker compose config'
                 sh 'docker compose build'
             }
-            post {
-                success {
-                    echo "Build passed for PR #${env.CHANGE_ID}. Automatically squashing and merging PR into ${env.CHANGE_TARGET}..."
-                    sh "gh pr merge ${env.CHANGE_ID} --squash --delete-branch"
-                }
+        }
+
+        stage('Squash & Merge PR') {
+            when {
+                changeRequest()
+            }
+            steps {
+                echo "Build succeeded. Squashing and merging PR #${env.CHANGE_ID} into ${env.CHANGE_TARGET}..."
+                sh "gh pr merge ${env.CHANGE_ID} --squash --delete-branch"
             }
         }
 
