@@ -1,52 +1,49 @@
-# Ofelia Integration & Migration Guide
+# Ofelia Integration & Setup Guide
 
-This document lists everything necessary to fully integrate **Ofelia** (Docker-native job scheduler) into the system, replacing ContainerPilot for job scheduling while using **Registrator** for Consul service discovery.
+A generic guideline for integrating **Ofelia** (a Docker-native job scheduler) into any containerized application or service. 
 
----
-
-## 1. Overview of Architectural Changes
-
-| Component | Current Setup (ContainerPilot) | Proposed Setup (Ofelia + Registrator) |
-| :--- | :--- | :--- |
-| **Scheduler** | In-container ContainerPilot process (`containerpilot.json5`) | Standalone **Ofelia** sidecar container (`mcuadros/ofelia`) |
-| **Consul Discovery** | ContainerPilot direct registration | Host-level **Registrator** discovering `SERVICE_*` env vars |
-| **App Image** | Custom Python image + ContainerPilot binary | Pure Python 3.13-slim image |
-| **Trigger Mechanism** | Internal 1-hour interval timer | Ofelia executing `docker exec` via Docker Socket |
+Ofelia operates as a lightweight sidecar container that reads Docker container labels to schedule and execute commands inside target containers via the Docker Socket.
 
 ---
 
-## 2. File-by-File Changes Required
+## 1. Architecture Overview
 
-### A. Update `docker-compose.yml`
-1. Add `SERVICE_NAME` and `SERVICE_TAGS` for **Registrator**.
-2. Add `ofelia.*` labels to the `weather` service.
-3. Add the `ofelia` service definition.
+| Component | Function |
+| :--- | :--- |
+| **Application Container** | Main service container running your application. Configured with `ofelia.*` labels. |
+| **Ofelia Sidecar** | Container running `mcuadros/ofelia` in `--docker` daemon mode, monitoring the Docker API socket to trigger jobs on scheduled containers. |
+| **Watchtower (Optional)** | Sidecar container for managing container updates. |
+| **Registrator (Optional)** | Container for discovery registration with Consul using `SERVICE_*` environment variables. |
+
+---
+
+## 2. Integration Steps
+
+### Step 1: Update `docker-compose.yml`
+
+Add the `ofelia` service definition and attach `ofelia.*` labels to your application service.
 
 ```yaml
 services:
-  weather:
+  app:
     build: .
-    image: ghcr.io/matheussouza88/weather:latest
-    container_name: weather-bot
+    image: ghcr.io/<your-github-user>/<your-repo-name>:<version-tag>
+    container_name: app
     restart: unless-stopped
     environment:
-      - CITY_NAME=${CITY_NAME:-Dublin, IE}
-      - OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY}
-      - SERVICE_NAME=weather-bot
-      - SERVICE_TAGS=automation,bot
+      - SERVICE_NAME=app
+      - SERVICE_TAGS=automation
     labels:
       - "ofelia.enabled=true"
-      - "ofelia.job-exec.weather-check.schedule=@hourly"
-      - "ofelia.job-exec.weather-check.command=/bin/bash hourly_run.sh"
+      - "ofelia.job-exec.<job-name>.schedule=@hourly"
+      - "ofelia.job-exec.<job-name>.command=/bin/bash /app/run_job.sh"
     volumes:
       - ./:/app
-      - ~/.gitconfig:/home/msilva/.gitconfig:ro
-      - ~/.ssh:/home/msilva/.ssh:ro
     networks:
-      - consul_consul
+      - custom_network
 
   ofelia:
-    image: mcuadros/ofelia:latest
+    image: mcuadros/ofelia:v0.3.9
     container_name: ofelia
     restart: unless-stopped
     command: daemon --docker
@@ -54,7 +51,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
   watchtower:
-    image: containrrr/watchtower:latest
+    image: containrrr/watchtower:1.7.1
     container_name: watchtower
     restart: unless-stopped
     environment:
@@ -62,19 +59,25 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ~/.docker/config.json:/config.json:ro
-    command: --interval 300 --cleanup weather-bot
+    command: --interval 300 --cleanup app
     depends_on:
-      - weather
+      - app
 
 networks:
-  consul_consul:
+  custom_network:
     external: true
 ```
 
+#### Ofelia Label Reference
+- `ofelia.enabled=true`: Enables Ofelia scheduler monitoring for the container.
+- `ofelia.job-exec.<job-name>.schedule`: Cron expression or shortcut (`@hourly`, `@daily`, `@every 1h`, `0 0 * * *`).
+- `ofelia.job-exec.<job-name>.command`: The command to execute inside the container.
+
 ---
 
-### B. Update `Dockerfile`
-Remove the multi-stage ContainerPilot download step and change the container `CMD` to keep the container running cleanly:
+### Step 2: Configure Application `Dockerfile`
+
+Ensure your container stays active so Ofelia can execute scheduled commands against it:
 
 ```dockerfile
 FROM python:3.13-slim
@@ -83,82 +86,65 @@ FROM python:3.13-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
-    unzip \
-    openssh-client \
-    && rm -rf /var/lib/apt/lists/* \
-    && git config --system --add safe.directory /app
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-# Create user msilva
-RUN groupadd -g 1000 msilva && \
-    useradd -u 1000 -g msilva -m msilva
-
-# Set permissions for /app
-RUN mkdir -p /app && chown msilva:msilva /app
-
-USER msilva
+# Set working directory
 WORKDIR /app
 
-# Copy application files
-COPY --chown=msilva:msilva . ./
+# Copy application code
+COPY . .
 
-# Main container command (idle supervisor wait loop)
+# Keep container alive in idle supervisor mode
 CMD ["sleep", "infinity"]
 ```
 
 ---
 
-### C. Update `hourly_run.sh`
-Remove the checkout reference to `containerpilot.json5` on line 15:
+### Step 3: Create Scheduled Job Script (`run_job.sh`)
 
-```diff
-- git checkout HEAD -- hourly_run.sh containerpilot.json5
-+ git checkout HEAD -- hourly_run.sh
+Create the script referenced in the Ofelia labels:
+
+```bash
+#!/bin/bash
+set -e
+
+echo "[$(date)] Running scheduled job execution..."
+# Add your application logic or script execution here
+```
+
+Ensure the script has executable permissions:
+```bash
+chmod +x run_job.sh
 ```
 
 ---
 
-### D. Delete Obsolete Files
-Delete the old ContainerPilot configuration file:
-* Remove `containerpilot.json5`
+## 3. Verification & Operational Testing
 
----
-
-## 3. Step-by-Step Migration & Deployment Procedure
-
-1. **Commit & Push Changes**:
-   Create a Pull Request with the updated `docker-compose.yml`, `Dockerfile`, and `hourly_run.sh`, and delete `containerpilot.json5`.
-
-2. **Deploy on Host (Raspberry Pi)**:
+1. **Start the Stack**:
    ```bash
-   # Pull latest image or rebuild locally
-   docker compose build weather
    docker compose up -d
    ```
 
-3. **Verify Ofelia Integration**:
-   Check Ofelia logs to ensure it detected the `weather-check` job:
+2. **Verify Ofelia Job Detection**:
+   Check Ofelia logs to verify it discovered the container labels and registered the job:
    ```bash
    docker logs ofelia
    ```
-   *Expected log output:*
-   `Scheduler started with 1 jobs.`
+   *Expected output:* `Scheduler started with 1 jobs.`
 
-4. **Verify Manual Execution**:
-   Test running the job on demand via Ofelia or `docker exec`:
+3. **Test Manual Execution**:
+   Run the job script manually to verify behavior inside the container:
    ```bash
-   docker exec weather-bot /bin/bash hourly_run.sh
-   ```
-
-5. **Verify Consul Service Discovery**:
-   Check that Registrator picked up `weather-bot`:
-   ```bash
-   curl -s http://localhost:8500/v1/catalog/service/weather-bot
+   docker exec app /bin/bash /app/run_job.sh
    ```
 
 ---
 
-## 4. Key Advantages of This Integration
+## 4. Security & Best Practices
 
-1. **Simpler Application Image**: Eliminates custom ARM builds of ContainerPilot.
-2. **Zero-Config Scheduling**: Uses Docker Labels Mode (`daemon --docker`), requiring no host config files.
-3. **Decoupled Architecture**: Clean separation between application execution (`weather-bot`), scheduling (`ofelia`), discovery (`registrator`), and updates (`watchtower`).
+- **Secrets Management**: Never commit API keys, tokens, or credentials to version control. Pass credentials via environment variables (`.env` file or secrets manager).
+- **Pinned Image Tags**: Use explicit image version tags (e.g. `v0.3.9`, `1.7.1`) instead of `:latest` to maintain deterministic deployments.
+- **Automated Updates**: Configure Dependabot (`.github/dependabot.yml`) to automatically check for base image and docker-compose version updates.
+- **Least Privilege**: Mount `/var/run/docker.sock` as read-only (`:ro`) in the `ofelia` service.
