@@ -3,7 +3,6 @@ pipeline {
 
     options {
         buildDiscarder(logRotator(daysToKeepStr: '7', numToKeepStr: '10'))
-        overrideIndexTriggers(true)
     }
 
     environment {
@@ -98,6 +97,20 @@ pipeline {
             }
             steps {
                 sh "docker push ${IMAGE_NAME}:latest"
+            }
+        }
+
+        stage('Deploy Services') {
+            when {
+                anyOf {
+                    branch 'master'
+                    branch 'main'
+                }
+            }
+            steps {
+                echo "Deploying Ofelia container stack on host..."
+                sh 'docker network create consul_consul || true'
+                sh 'docker compose up -d --remove-orphans'
             }
         }
 
