@@ -27,7 +27,7 @@ services:
 
   watchtower:
     image: containrrr/watchtower:1.7.1
-    container_name: watchtower
+    container_name: watchtower-app
     restart: unless-stopped
     environment:
       - DOCKER_API_VERSION=1.47
