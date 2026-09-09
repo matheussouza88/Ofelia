@@ -2,6 +2,7 @@ pipeline {
     agent any
 
     options {
+        overrideIndexTriggers(true)
         buildDiscarder(logRotator(daysToKeepStr: '7', numToKeepStr: '10'))
     }
 
