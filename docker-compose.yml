@@ -10,6 +10,7 @@ services:
       - "ofelia.enabled=true"
       - "ofelia.job-exec.scheduled-job.schedule=@hourly"
       - "ofelia.job-exec.scheduled-job.command=/bin/bash hourly_run.sh"
+      - "com.centurylinklabs.watchtower.enable=true"
     volumes:
       - ./:/app
       - ~/.gitconfig:/home/msilva/.gitconfig:ro
@@ -24,19 +25,6 @@ services:
     command: daemon --docker
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-
-  watchtower:
-    image: containrrr/watchtower:1.7.1
-    container_name: watchtower-app
-    restart: unless-stopped
-    environment:
-      - DOCKER_API_VERSION=1.47
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ~/.docker/config.json:/config.json:ro
-    command: --interval 300 --cleanup app
-    depends_on:
-      - app
 
 networks:
   consul_consul:
