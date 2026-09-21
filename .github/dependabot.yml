@@ -4,8 +4,18 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    labels:
+      - "type: chore"
+      - "scope: docker"
+      - "dependencies: docker"
+      - "bot: dependabot"
 
   - package-ecosystem: "docker-compose"
     directory: "/"
     schedule:
       interval: "weekly"
+    labels:
+      - "type: chore"
+      - "scope: docker"
+      - "dependencies: docker"
+      - "bot: dependabot"
