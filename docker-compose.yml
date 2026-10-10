@@ -23,6 +23,8 @@ services:
     container_name: ofelia
     restart: unless-stopped
     command: daemon --docker
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
